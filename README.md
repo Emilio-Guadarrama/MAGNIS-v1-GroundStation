@@ -46,21 +46,24 @@ v1 is built around four rules:
 | Block | Component |
 |---|---|
 | MCU | ESP32-DevKitC V4 · ESP32-WROOM-32D · plug-in on 2 × 19 female headers · CP2102 USB-UART |
-| RF Telemetry | RFM95W · 915 MHz LoRa · SMA edge connector · 50 Ω CPWG feed with π-match footprint |
-| GNSS | Adafruit Ultimate GPS breakout (PA1616S) · plug-in · PPS for time sync |
-| Storage | MicroSD push-push socket (same as IGNIS v5) + 6-pin header for an external SPI module · dedicated SPI bus |
-| Power | USB 5 V from the dev board · AP2112K-3.3 LDO · solder-jumper fallback to the dev board 3.3 V · power LEDs |
-| Indicators | 3× WS2812B RGB (5 V, buffered data line) · 5 V active buzzer |
-| Configuration | MODE_SEL jumper · rocket or CanSat link profile, read at boot |
+| RF Telemetry | RFM95W · 915 MHz LoRa · SMA edge connector |
+| GNSS | Adafruit Ultimate GPS breakout (PA1616S) · plug-in · PPS and FIX to input-only pins |
+| Storage | MicroSD push-push socket (same as IGNIS v5) + 6-pin header for an external SPI module (own CS and MISO) |
+| SPI | One shared bus on the native VSPI pins (RFM95W + microSD) |
+| Power | USB 5 V through the dev board · 3.3 V from the dev board regulator |
+| Indicators | 3× WS2812B RGB (3.3 V) · MLT-8530 magnetic buzzer (5 V, MOSFET low-side, PWM tone) |
 | Host link | USB to laptop · PySide6 + pyqtgraph live dashboard · per-session CSV logging |
 | PCB | 2-layer · 100 × 100 mm · Altium Designer · JLCPCB fabrication, assembled in Mexico |
 
 ### Link profiles
 
-| Profile | MODE_SEL | Spreading factor | Bandwidth | Sync word |
-|---|---|---|---|---|
-| Rocket (IGNIS flight computer) | Open | SF9 | 125 kHz | 0x12 |
-| CanSat | Jumper fitted | SF9 | 125 kHz | 0xAB |
+| Profile | Spreading factor | Bandwidth | Sync word |
+|---|---|---|---|
+| Rocket (IGNIS flight computer) | SF9 | 125 kHz | 0x12 |
+| CanSat | SF9 | 125 kHz | 0xAB |
+
+The default profile is set in the firmware (`LINK_PROFILE_DEFAULT`) and can be switched from the laptop
+at any time by sending `PROFILE:ROCKET` or `PROFILE:CANSAT` over USB.
 
 > In Brazil (LASC) the channel must sit fully inside the 915–928 MHz band allowed by ANATEL. The
 > frequency is set in the firmware configuration.
@@ -75,49 +78,45 @@ missions or for antenna diversity.
 ```mermaid
 flowchart TD
     PC[Laptop<br/>PySide6 dashboard + CSV]
-    PC <--> MCU[ESP32-DevKitC V4<br/>WROOM-32D · plug-in]
+    PC <-->|USB · CP2102| MCU[ESP32-DevKitC V4<br/>WROOM-32D · plug-in]
 
     MCU --> RAIL5[5 V rail<br/>from USB]
-    RAIL5 --> LDO33[AP2112K-3.3<br/>5 V to 3.3 V]
-    LDO33 --> RAIL33[3.3 V rail]
+    MCU --> RAIL33[3.3 V rail<br/>dev board regulator]
 
     RAIL33 --> LORA[RFM95W LoRa<br/>915 MHz]
     RAIL33 --> SD[MicroSD socket<br/>push-push]
-    RAIL5 --> GNSS[Adafruit Ultimate GPS<br/>plug-in]
-    RAIL5 --> EXTSD[External microSD<br/>module header]
+    RAIL33 --> EXTSD[External microSD<br/>module header]
+    RAIL33 --> GNSS[Adafruit Ultimate GPS<br/>plug-in]
+    RAIL33 --> LED[3 × WS2812B]
+    RAIL5 --> BUZ[MLT-8530 buzzer<br/>NTS4001 low-side]
 
-    MCU <-->|VSPI| LORA
+    MCU <-->|VSPI shared| LORA
+    MCU <-->|VSPI shared| SD
+    MCU <-->|VSPI, own CS + MISO| EXTSD
     LORA --> ANT[SMA antenna]
-    MCU <-->|HSPI| SD
-    MCU <-->|HSPI, own MISO| EXTSD
-    GNSS -->|UART + PPS| MCU
-
-    MCU --> BUF[SN74AHCT1G125<br/>3.3 V to 5 V buffer]
-    BUF --> LED[3 × WS2812B]
-    MCU --> BUZ[NPN driver<br/>5 V active buzzer]
-    MODE[MODE_SEL jumper] --> MCU
+    GNSS -->|UART2 + PPS + FIX| MCU
+    MCU --> LED
+    MCU --> BUZ
 ```
 
 ---
 
 ## Pin Map
 
-The net names match the IGNIS flight computer, so porting the firmware only means changing the pin defines.
+Matches schematic VESTA-v1-SCH-01. The net names follow the IGNIS flight computer, so porting the
+firmware only means changing the pin defines.
 
 | Net | GPIO | Note |
 |---|---|---|
-| RFM95W_SCK / MISO / MOSI | 18 / 19 / 23 | VSPI |
-| RFM95W_CS / RST / DIO0 | 5 / 27 / 26 | CS idles high at boot |
-| RFM95W_DIO1 | 33 | optional |
-| SD_SCK / SD_MOSI | 14 / 13 | HSPI, dedicated bus |
-| SD_MISO_SLOT / SD_CS_SLOT | 34 / 15 | input-only MISO · external pull-ups |
-| SD_MISO_EXT / SD_CS_EXT | 35 / 4 | external module |
-| GPS_TX / GPS_RX | 16 / 17 | UART2 · `Serial2.begin(9600, SERIAL_8N1, 16, 17)` |
-| GPS_PPS | 32 | |
-| WS2812B_DIN | 25 | through the 3.3 → 5 V buffer |
-| BUZZER | 22 | |
-| MODE_SEL | 36 | input-only · pull-up · jumper fitted = CanSat |
-| **Do not connect** | 0, 1, 2, 3, 6–11, 12 | strapping, UART0 (USB link), internal SPI flash |
+| SNS_SPI_SCK / MISO / MOSI | 18 / 19 / 23 | native VSPI · pull-ups on MISO and MOSI |
+| RFM95W_CS / RESET / INT | 5 / 25 / 32 | CS is VSPI CS0 (idles high at boot) |
+| SD_CS | 21 | onboard slot · pull-up |
+| SD_CS_EXT / SD_MISO_EXT | 4 / 39 | external module · MISO on an input-only pin |
+| GPS_UART_TX / GPS_UART_RX | 16 / 17 | UART2 · `Serial2.begin(9600, SERIAL_8N1, 16, 17)` |
+| GPS_PPS / FIX_GPS | 34 / 35 | input-only pins |
+| WS2812B_DATA | 26 | 33 Ω series resistor at LED1 |
+| BUZZER | 27 | MOSFET gate · 10 kΩ pull-down · PWM tone |
+| **Do not connect** | 0, 1, 2, 3, 6–11, 12, 15 | strapping, UART0 (USB link), internal SPI flash |
 
 > GPIO12 must never be pulled high at boot: it selects 1.8 V flash and the board will not start.
 
@@ -127,22 +126,24 @@ The net names match the IGNIS flight computer, so porting the firmware only mean
 
 ```
 VESTA-v1-GroundStation/
-├── Schematics/
-│   ├── Main.SchDoc
-│   ├── Power.SchDoc
-│   ├── RF_LoRa.SchDoc
-│   ├── GPS.SchDoc
-│   ├── Storage.SchDoc
-│   └── Indicators.SchDoc
-├── PCB/
-│   └── VESTA_v1.PcbDoc
-├── Libraries/
-├── BOM/
-│   └── VESTA_v1_Parts_List.xlsx
+├── PCB_Project_VESTA-v1-GroundStation/
+│   ├── Project_Group_VESTA-v1-GroundStation.DsnWrk
+│   ├── PCB_Project_VESTA-v1-GroundStation.PrjPcb
+│   ├── Sch_VESTA-v1.SchDoc
+│   └── PCB_VESTA-v1.PcbDoc
 ├── Firmware/
-├── Dashboard/
-└── Fabrication/
+│   └── VESTA_GS_v1/
+│       └── VESTA_GS_v1.ino
+├── BOM/
+│   ├── VESTA_v1_Parts_List.xlsx
+│   └── VESTA_v1_Netlist.xlsx
+├── LICENSE
+└── README.md
 ```
+
+The schematic is a **single sheet**: the board is simple enough that each block (Main, Power,
+RF_LoRa, GPS, Storage, Indicators) is separated by a drawn frame on the same page. The netlist
+uses these block names.
 
 ---
 

@@ -10,20 +10,22 @@
   because the VESTA v1 board is not finished. Expect pin, library
   and timing fixes during bring-up.
 
+  Pin map matches schematic VESTA-v1-SCH-01 (Sch_VESTA-v1.SchDoc).
+
   What changed from IGNIS_GroundStation_Heavy_3:
     - MCU: ESP32-DevKitC V4 (ESP32-WROOM-32D) instead of ESP32-S3.
-      All pins re-mapped to the VESTA v1 netlist.
-    - LoRa and microSD on SEPARATE SPI buses (VSPI / HSPI), so the
-      SD card can no longer break the radio.
-    - MODE_SEL jumper (IO36) picks the link profile at boot:
-      open = rocket (sync 0x12), jumper fitted = CanSat (sync 0xAB).
-    - SD source selectable at compile time: onboard slot or the
-      external microSD module header (each has its own MISO and CS).
-      No card-detect pin on VESTA.
-    - Onboard GPS (Adafruit Ultimate GPS on UART2): GS position on
-      the dashboard, distance to the rocket, and time sync from GPS
+    - One shared SPI bus on the native VSPI pins (SCK 18 / MISO 19 /
+      MOSI 23) for the RFM95W and the onboard microSD slot.
+    - External microSD module header (J2) as a backup/test path: own
+      CS (IO4) and own MISO (IO39). While it is used, the VSPI MISO
+      input is re-routed to IO39 and the radio is paused.
+    - Link profile (rocket 0x12 / CanSat 0xAB) set by LINK_PROFILE_DEFAULT
+      and switchable at runtime from the PC with "PROFILE:ROCKET" or
+      "PROFILE:CANSAT".
+    - Onboard GPS (Adafruit Ultimate GPS on UART2): GS position,
+      distance to the rocket, and time sync from GPS
       (the PC SETTIME:<epoch> sync is kept as a fallback/override).
-    - 3x WS2812B status LEDs and a buzzer.
+    - 3x WS2812B status LEDs and an MLT-8530 passive buzzer (PWM tone).
   Kept unchanged: TelemetryPacket layout, CSV format (plus GS GPS
   columns), PC time-sync protocol, dashboard, RSSI/SNR register reads.
 
@@ -43,42 +45,40 @@
 #include <Adafruit_NeoPixel.h>
 #include <TinyGPSPlus.h>
 #include <time.h>
-#include <math.h>
+#include "soc/gpio_sig_map.h"   // VSPIQ_IN_IDX, for re-routing MISO to the external SD module
 
 // ================================================================
-// VESTA v1 pin map (see VESTA_v1_Netlist.xlsx)
+// VESTA v1 pin map (schematic VESTA-v1-SCH-01)
 // ================================================================
-// LoRa — VSPI
-#define PIN_RFM95_SCK      18
-#define PIN_RFM95_MISO     19
-#define PIN_RFM95_MOSI     23
-#define PIN_RFM95_CS        5
-#define PIN_RFM95_RST      27
-#define PIN_RFM95_DIO0     26
-#define PIN_RFM95_DIO1     33   // not used yet
+// Shared SPI bus — native VSPI pins
+#define PIN_SPI_SCK        18   // SNS_SPI_SCK
+#define PIN_SPI_MISO       19   // SNS_SPI_MISO (RFM95W + onboard slot)
+#define PIN_SPI_MOSI       23   // SNS_SPI_MOSI
 
-// microSD — HSPI (dedicated bus)
-#define PIN_SD_SCK         14
-#define PIN_SD_MOSI        13
-#define PIN_SD_MISO_SLOT   34   // input-only pin, external pull-up on board
-#define PIN_SD_CS_SLOT     15
-#define PIN_SD_MISO_EXT    35   // input-only pin
-#define PIN_SD_CS_EXT       4
+// RFM95W
+#define PIN_RFM95_CS        5   // RFM95W_CS (VSPI CS0)
+#define PIN_RFM95_RST      25   // RFM95W_RESET
+#define PIN_RFM95_DIO0     32   // RFM95W_INT
+
+// microSD
+#define PIN_SD_CS          21   // SD_CS — onboard slot (CARD1), pull-up R5
+#define PIN_SD_CS_EXT       4   // SD_CS_EXT — external module header J2
+#define PIN_SD_MISO_EXT    39   // SD_MISO_EXT — input-only pin
 
 // GPS — UART2
-#define PIN_GPS_RX         16   // ESP32 RX  <- GPS TX (net GPS_TX)
-#define PIN_GPS_TX         17   // ESP32 TX  -> GPS RX (net GPS_RX)
-#define PIN_GPS_PPS        32   // not used yet
+#define PIN_GPS_RX         16   // ESP32 RX <- GPS TX (net GPS_UART_TX)
+#define PIN_GPS_TX         17   // ESP32 TX -> GPS RX (net GPS_UART_RX)
+#define PIN_GPS_PPS        34   // GPS_PPS, input-only — not used yet
+#define PIN_GPS_FIX        35   // FIX_GPS, input-only — not used yet
 
-// Indicators / config
-#define PIN_WS2812B        25
-#define PIN_BUZZER         22   // active buzzer through Q1 (HIGH = on)
-#define PIN_MODE_SEL       36   // input-only, external pull-up. LOW = CanSat
+// Indicators
+#define PIN_WS2812B        26   // WS2812B_DATA (33 Ω R2 at LED1)
+#define PIN_BUZZER         27   // BUZZER -> Q1 gate (NTS4001), R3 pull-down
 
 // ================================================================
 // Options
 // ================================================================
-#define SD_USE_EXT_MODULE   0          // 0 = onboard slot (J2), 1 = external module (J3)
+#define SD_USE_EXT_MODULE   0          // 0 = onboard slot (CARD1), 1 = external module (J2)
 #define SD_SPI_FREQ_HZ      4000000
 #define SD_MOUNT_RETRY_MS   10000
 
@@ -88,6 +88,7 @@
 #define DASHBOARD_INTERVAL_MS 500
 #define LINK_STALE_MS       5000
 #define LED_BRIGHTNESS      40
+#define BUZZER_FREQ_HZ      2700       // MLT-8530 resonant frequency
 
 // ================================================================
 // Link profiles — MUST MATCH the transmitter firmware.
@@ -104,6 +105,7 @@ struct LinkProfile {
 };
 static const LinkProfile PROFILE_ROCKET = { "ROCKET", 915.0, 9, 125000, 5, 0x12 };
 static const LinkProfile PROFILE_CANSAT = { "CANSAT", 915.5, 9, 125000, 5, 0xAB };
+#define LINK_PROFILE_DEFAULT PROFILE_ROCKET
 static LinkProfile linkCfg;   // "link" would clash with POSIX link()
 
 // ================================================================
@@ -161,7 +163,6 @@ static const char* flightStateName(uint8_t s) {
 // Objects and state
 // ================================================================
 static RH_RF95 rf95(PIN_RFM95_CS, PIN_RFM95_DIO0);   // uses the global SPI (VSPI)
-static SPIClass sdSPI(HSPI);
 static Adafruit_NeoPixel leds(3, PIN_WS2812B, NEO_GRB + NEO_KHZ800);
 static TinyGPSPlus gps;
 static HardwareSerial gpsSerial(2);
@@ -195,7 +196,6 @@ static unsigned long gsLastMountAttemptMs = 0;
 // Timers
 static unsigned long lastDashboardMs = 0;
 static unsigned long lastLedMs       = 0;
-static unsigned long buzzerOffAt     = 0;
 
 const char GS_CSV_HEADER[] =
   "datetime,recv_millis,rssi_dbm,snr_db,seq,fc_timestamp_ms,state,"
@@ -208,17 +208,25 @@ const char GS_CSV_HEADER[] =
   "gs_lat,gs_lon,gs_fix,range_m";
 
 // ================================================================
-// Buzzer (non-blocking)
+// Buzzer — MLT-8530 is passive: needs a PWM tone, not a DC level
 // ================================================================
 static void beep(unsigned long ms) {
-  digitalWrite(PIN_BUZZER, HIGH);
-  buzzerOffAt = millis() + ms;
+  tone(PIN_BUZZER, BUZZER_FREQ_HZ, ms);   // non-blocking on ESP32
 }
-static void serviceBuzzer() {
-  if (buzzerOffAt && (long)(millis() - buzzerOffAt) >= 0) {
-    digitalWrite(PIN_BUZZER, LOW);
-    buzzerOffAt = 0;
-  }
+
+// ================================================================
+// Radio
+// ================================================================
+static void applyLinkProfile(const LinkProfile& p) {
+  linkCfg = p;
+  rf95.setFrequency(linkCfg.freqMhz);
+  rf95.setSpreadingFactor(linkCfg.sf);
+  rf95.setSignalBandwidth(linkCfg.bwHz);
+  rf95.setCodingRate4(linkCfg.crDenom);
+  rf95.spiWrite(0x39, linkCfg.syncWord);   // RegSyncWord, written directly (same as FC)
+  rf95.setModeRx();
+  Serial.printf("[LORA] %s profile: %.1f MHz, SF%d, BW%ldkHz, sync 0x%02X\n",
+                linkCfg.name, linkCfg.freqMhz, linkCfg.sf, linkCfg.bwHz / 1000, linkCfg.syncWord);
 }
 
 // ================================================================
@@ -247,7 +255,9 @@ static void getRealDateTimeString(char* buffer, size_t size, unsigned long curre
   }
 }
 
-static void handleSerialTimeSync() {
+// PC commands over USB serial (one per line):
+//   SETTIME:<unix_epoch_utc>   PROFILE:ROCKET   PROFILE:CANSAT
+static void handleSerialCommands() {
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\n' || c == '\r') {
@@ -257,6 +267,10 @@ static void handleSerialTimeSync() {
           time_t epoch = (time_t)strtoul(serialLineBuf + 8, nullptr, 10);
           if (epoch > 0) applyTimeSync(epoch, "PC");
           else Serial.println("[TIME] Ignored malformed SETTIME line.");
+        } else if (strcmp(serialLineBuf, "PROFILE:ROCKET") == 0) {
+          applyLinkProfile(PROFILE_ROCKET);
+        } else if (strcmp(serialLineBuf, "PROFILE:CANSAT") == 0) {
+          applyLinkProfile(PROFILE_CANSAT);
         }
         serialLineLen = 0;
       }
@@ -314,42 +328,58 @@ static float rangeToRocketM() {
 }
 
 // ================================================================
-// SD logging — onboard slot or external module, on HSPI
+// SD logging — onboard slot, or external module through J2
 // ================================================================
-static bool gsAttemptSDMount() {
 #if SD_USE_EXT_MODULE
-  const int misoPin = PIN_SD_MISO_EXT, csPin = PIN_SD_CS_EXT;
-  const char* srcName = "external module (J3)";
+  #define SD_ACTIVE_CS   PIN_SD_CS_EXT
+  #define SD_SRC_NAME    "external module (J2)"
 #else
-  const int misoPin = PIN_SD_MISO_SLOT, csPin = PIN_SD_CS_SLOT;
-  const char* srcName = "onboard slot (J2)";
+  #define SD_ACTIVE_CS   PIN_SD_CS
+  #define SD_SRC_NAME    "onboard slot (CARD1)"
 #endif
-  sdSPI.end();
-  sdSPI.begin(PIN_SD_SCK, misoPin, PIN_SD_MOSI, csPin);
 
-  if (!SD.begin(csPin, sdSPI, SD_SPI_FREQ_HZ)) {
-    Serial.printf("[SD] SD.begin() failed on %s — continuing without logging.\n", srcName);
-    return false;
-  }
-  if (SD.cardType() == CARD_NONE) {
+// The external module has its own MISO line (IO39) because its buffer
+// never releases MISO. While it is accessed, the VSPI MISO input is
+// re-routed to IO39 and the radio is put in idle so its interrupt
+// cannot use the bus with the wrong MISO. Missed packets: a few ms per write.
+static void sdBusBegin() {
+#if SD_USE_EXT_MODULE
+  rf95.setModeIdle();
+  pinMatrixInAttach(PIN_SD_MISO_EXT, VSPIQ_IN_IDX, false);
+#endif
+}
+static void sdBusEnd() {
+#if SD_USE_EXT_MODULE
+  pinMatrixInAttach(PIN_SPI_MISO, VSPIQ_IN_IDX, false);
+  rf95.setModeRx();
+#endif
+}
+
+static bool gsAttemptSDMount() {
+  sdBusBegin();
+  bool ok = SD.begin(SD_ACTIVE_CS, SPI, SD_SPI_FREQ_HZ);
+  if (!ok) {
+    Serial.println("[SD] SD.begin() failed on " SD_SRC_NAME " — continuing without logging.");
+  } else if (SD.cardType() == CARD_NONE) {
     Serial.println("[SD] Card type NONE — continuing without logging.");
-    return false;
+    ok = false;
+  } else {
+    for (int i = 0; i < 1000; i++) {
+      snprintf(gsLogPath, sizeof(gsLogPath), "/VESTA%03d.CSV", i);
+      if (!SD.exists(gsLogPath)) break;
+    }
+    gsLogFile = SD.open(gsLogPath, FILE_WRITE);
+    if (!gsLogFile) {
+      Serial.printf("[SD] Failed to create %s\n", gsLogPath);
+      ok = false;
+    } else {
+      gsLogFile.println(GS_CSV_HEADER);
+      gsLogFile.flush();
+      Serial.printf("[SD] Logging to %s on " SD_SRC_NAME "\n", gsLogPath);
+    }
   }
-
-  for (int i = 0; i < 1000; i++) {
-    snprintf(gsLogPath, sizeof(gsLogPath), "/VESTA%03d.CSV", i);
-    if (!SD.exists(gsLogPath)) break;
-  }
-
-  gsLogFile = SD.open(gsLogPath, FILE_WRITE);
-  if (!gsLogFile) {
-    Serial.printf("[SD] Failed to create %s\n", gsLogPath);
-    return false;
-  }
-  gsLogFile.println(GS_CSV_HEADER);
-  gsLogFile.flush();
-  Serial.printf("[SD] Logging to %s on %s\n", gsLogPath, srcName);
-  return true;
+  sdBusEnd();
+  return ok;
 }
 
 static void gsMaintainSDConnection() {
@@ -367,6 +397,7 @@ static void gsLogPacket(const TelemetryPacket& pkt, unsigned long recvMillis, in
   char dateTimeBuf[32];
   getRealDateTimeString(dateTimeBuf, sizeof(dateTimeBuf), recvMillis);
 
+  sdBusBegin();
   size_t written = gsLogFile.printf(
     "%s,%lu,%d,%.1f,%lu,%lu,%u,"
     "%.1f,%.2f,%.2f,%.2f,%d,"
@@ -396,6 +427,7 @@ static void gsLogPacket(const TelemetryPacket& pkt, unsigned long recvMillis, in
     SD.end();
     gsSdReady = false;
   }
+  sdBusEnd();
 }
 
 // ================================================================
@@ -417,10 +449,10 @@ static void updateLeds() {
   leds.setPixelColor(0, gsSdReady ? GREEN : RED);
 
   uint32_t linkColor;
-  if (!havePacket)                          linkColor = AMBER;
-  else if (now - lastPacketMs < 100)        linkColor = BLUE;
+  if (!havePacket)                             linkColor = AMBER;
+  else if (now - lastPacketMs < 100)           linkColor = BLUE;
   else if (now - lastPacketMs < LINK_STALE_MS) linkColor = GREEN;
-  else                                      linkColor = RED;
+  else                                         linkColor = RED;
   leds.setPixelColor(1, linkColor);
 
   leds.setPixelColor(2, gsHasFix() ? GREEN : AMBER);
@@ -436,8 +468,16 @@ void setup() {
   Serial.println();
   Serial.println("=== VESTA v1 Ground Station (preliminary, untested) ===");
 
+  // Every SPI chip select high before anything touches the bus
+  pinMode(PIN_RFM95_CS, OUTPUT);  digitalWrite(PIN_RFM95_CS, HIGH);
+  pinMode(PIN_SD_CS, OUTPUT);     digitalWrite(PIN_SD_CS, HIGH);
+  pinMode(PIN_SD_CS_EXT, OUTPUT); digitalWrite(PIN_SD_CS_EXT, HIGH);
+
   pinMode(PIN_BUZZER, OUTPUT);
   digitalWrite(PIN_BUZZER, LOW);
+  pinMode(PIN_GPS_PPS, INPUT);
+  pinMode(PIN_GPS_FIX, INPUT);
+
   leds.begin();
   leds.setBrightness(LED_BRIGHTNESS);
   leds.clear();
@@ -446,13 +486,8 @@ void setup() {
   setenv("TZ", GS_TIMEZONE, 1);
   tzset();
 
-  // Link profile from the MODE_SEL jumper (read once at boot)
-  pinMode(PIN_MODE_SEL, INPUT);   // GPIO36 has no internal pull-up: R13 on board
-  linkCfg = (digitalRead(PIN_MODE_SEL) == LOW) ? PROFILE_CANSAT : PROFILE_ROCKET;
-  Serial.printf("[MODE] MODE_SEL -> %s profile\n", linkCfg.name);
-
-  // LoRa on VSPI (global SPI object, used by RadioHead)
-  SPI.begin(PIN_RFM95_SCK, PIN_RFM95_MISO, PIN_RFM95_MOSI, PIN_RFM95_CS);
+  // Shared VSPI bus (native pins) — RadioHead and SD both use the global SPI
+  SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
 
   pinMode(PIN_RFM95_RST, OUTPUT);
   digitalWrite(PIN_RFM95_RST, HIGH); delay(10);
@@ -464,18 +499,12 @@ void setup() {
     leds.fill(leds.Color(255, 0, 0));
     leds.show();
     beep(1000);
-    while (true) { serviceBuzzer(); delay(10); }
+    while (true) delay(1000);
   }
-  rf95.setFrequency(linkCfg.freqMhz);
-  rf95.setSpreadingFactor(linkCfg.sf);
-  rf95.setSignalBandwidth(linkCfg.bwHz);
-  rf95.setCodingRate4(linkCfg.crDenom);
-  rf95.spiWrite(0x39, linkCfg.syncWord);   // RegSyncWord, written directly (same as FC)
+  applyLinkProfile(LINK_PROFILE_DEFAULT);
+  Serial.println("[LORA] Send PROFILE:ROCKET or PROFILE:CANSAT to switch.");
 
-  Serial.printf("[LORA] Listening at %.1f MHz, SF%d, BW%ldkHz, sync 0x%02X\n",
-                linkCfg.freqMhz, linkCfg.sf, linkCfg.bwHz / 1000, linkCfg.syncWord);
-
-  // microSD on HSPI
+  // microSD
   gsSdReady = gsAttemptSDMount();
   gsLastMountAttemptMs = millis();
 
@@ -538,10 +567,10 @@ static void printDashboard() {
 
   if (gsHasFix()) {
     float range = rangeToRocketM();
-    Serial.printf(" GS GPS  FIX  sats:%2u  lat:%10.6f  lon:%11.6f  range: %s",
-                  (unsigned)gps.satellites.value(), gps.location.lat(), gps.location.lng(),
-                  range >= 0 ? "" : "n/a\n");
+    Serial.printf(" GS GPS  FIX  sats:%2u  lat:%10.6f  lon:%11.6f  range: ",
+                  (unsigned)gps.satellites.value(), gps.location.lat(), gps.location.lng());
     if (range >= 0) Serial.printf("%.0f m\n", range);
+    else            Serial.println("n/a");
   } else {
     Serial.printf(" GS GPS  NO FIX  sats:%2u\n", (unsigned)gps.satellites.value());
   }
@@ -564,7 +593,7 @@ static void printDashboard() {
 // Loop
 // ================================================================
 void loop() {
-  handleSerialTimeSync();
+  handleSerialCommands();
   maybeRequestTimeSync();
   readGps();
   maybeSyncTimeFromGps();
@@ -613,7 +642,6 @@ void loop() {
 
   gsMaintainSDConnection();
   updateLeds();
-  serviceBuzzer();
 
   unsigned long now = millis();
   if (now - lastDashboardMs >= DASHBOARD_INTERVAL_MS) {

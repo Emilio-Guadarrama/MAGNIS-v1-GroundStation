@@ -23,4 +23,13 @@ ProjectPath=Components\GPS - Ultimate GPS Breakout 66 channel Adafruit\GPS\GPS.L
 ProjectPath=Components\RF Module (LoRa) - RFM95W\Antenna-RFM95W-868S2\Antenna-RFM95W-868S2.LibPkg
 
 [Project8]
-ProjectPath=Components\N-channel MOSFET Transistor, 0.27 A, 30 V - NTS4001NT1G -  SC-70 (Buzzer)\NTS4001NT1G\NTS4001NT1G.LibPkg
+ProjectPath=Components\SMA port - BWSMA-KE-Z001\SMA\SMA.LibPkg
+
+[Project9]
+ProjectPath=Components\Buzzer - BWSMA-KE-Z001 or CMI-1275C-050\MLT-8530\Buzzer - MLT-8530.LibPkg
+
+[Project10]
+ProjectPath=Components\Switching diode (buzzer flyback) - 1N4148W\1N4148W\1N4148W.LibPkg
+
+[Project11]
+ProjectPath=Components\NTS4001NT1G - SC-70 (Buzzer)\NTS4001NT1G\NTS4001NT1G.LibPkg

@@ -33,3 +33,9 @@ ProjectPath=Components\Switching diode (buzzer flyback) - 1N4148W\1N4148W\1N4148
 
 [Project11]
 ProjectPath=Components\NTS4001NT1G - SC-70 (Buzzer)\NTS4001NT1G\NTS4001NT1G.LibPkg
+
+[Project12]
+ProjectPath=Components\Button - SKRPABE010 Micro Switch\SKRPABE010\SKRPABE010.LibPkg
+
+[Project13]
+ProjectPath=Components\Pin header 4\TSW-104-07-S-S-LL\TSW-104-07-S-S-LL.LibPkg

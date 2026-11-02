@@ -101,6 +101,10 @@ GenerateClassCluster=0
 DocumentUniqueId=
 
 [GeneratedDocument1]
+DocumentPath=Project Outputs for PCB_Project_MAGNIS-v1-GroundStation\Design Rule Check - PCB_MAGNIS-v1.html
+DItemRevisionGUID=
+
+[GeneratedDocument2]
 DocumentPath=Project Outputs for PCB_Project_VESTA-v1-GroundStation\Design Rule Check - PCB_VESTA-v1.html
 DItemRevisionGUID=
 

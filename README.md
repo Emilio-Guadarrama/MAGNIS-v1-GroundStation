@@ -165,6 +165,34 @@ Routing diagrams and the bottom silkscreen proposal are in `Docs/`.
 
 ---
 
+## Gallery
+
+### 3D views
+
+<table>
+  <tr>
+    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/top%203d%20view.png" alt="MAGNIS v1 top 3D view"><br><sub><b>Top</b> — 3D render from Altium Designer</sub></td>
+    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/bottom%203d%20view.png" alt="MAGNIS v1 bottom 3D view"><br><sub><b>Bottom</b> — 3D render from Altium Designer</sub></td>
+  </tr>
+</table>
+
+### Copper layers
+
+<table>
+  <tr>
+    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/top%20layer.png" alt="MAGNIS v1 top layer routing"><br><sub><b>Top layer</b> — signals and power</sub></td>
+    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/bottom%20layer.png" alt="MAGNIS v1 bottom layer"><br><sub><b>Bottom layer</b> — GND plane</sub></td>
+  </tr>
+</table>
+
+### Schematic
+
+<a href="Docs/MAGNIS-v1_Schematic.pdf"><img src="Docs/MAGNIS-v1_Schematic.png" alt="MAGNIS v1 schematic: single sheet with one frame per block" width="100%"></a>
+
+<sub>Single sheet, one frame per block. <a href="Docs/MAGNIS-v1_Schematic.pdf"><b>Open the schematic as a PDF</b></a>.</sub>
+
+---
+
 ## Firmware
 
 `Firmware/MAGNIS_GS_v1/MAGNIS_GS_v1.ino` — **preliminary, not tested on hardware yet.**

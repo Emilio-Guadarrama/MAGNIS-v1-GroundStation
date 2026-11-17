@@ -171,8 +171,8 @@ Routing diagrams and the bottom silkscreen proposal are in `Docs/`.
 
 <table>
   <tr>
-    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/top%203d%20view.png" alt="MAGNIS v1 top 3D view"><br><sub><b>Top</b> — 3D render from Altium Designer</sub></td>
-    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/bottom%203d%20view.png" alt="MAGNIS v1 bottom 3D view"><br><sub><b>Bottom</b> — 3D render from Altium Designer</sub></td>
+    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/top%203d%20view.png" alt="MAGNIS v1 top 3D view"><br><sub>Top: 3D render from Altium Designer</sub></td>
+    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/bottom%203d%20view.png" alt="MAGNIS v1 bottom 3D view"><br><sub>Bottom: 3D render from Altium Designer</sub></td>
   </tr>
 </table>
 
@@ -180,8 +180,8 @@ Routing diagrams and the bottom silkscreen proposal are in `Docs/`.
 
 <table>
   <tr>
-    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/top%20layer.png" alt="MAGNIS v1 top layer routing"><br><sub><b>Top layer</b> — signals and power</sub></td>
-    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/bottom%20layer.png" alt="MAGNIS v1 bottom layer"><br><sub><b>Bottom layer</b> — GND plane</sub></td>
+    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/top%20layer.png" alt="MAGNIS v1 top layer routing"><br><sub>Top layer: signals and power</sub></td>
+    <td width="50%"><img src="PCB_Project_MAGNIS-v1-GroundStation/Images/PCB/bottom%20layer.png" alt="MAGNIS v1 bottom layer"><br><sub>Bottom layer: GND plane</sub></td>
   </tr>
 </table>
 
@@ -189,7 +189,7 @@ Routing diagrams and the bottom silkscreen proposal are in `Docs/`.
 
 <a href="Docs/MAGNIS-v1_Schematic.pdf"><img src="Docs/MAGNIS-v1_Schematic.png" alt="MAGNIS v1 schematic: single sheet with one frame per block" width="100%"></a>
 
-<sub>Single sheet, one frame per block. <a href="Docs/MAGNIS-v1_Schematic.pdf"><b>Open the schematic as a PDF</b></a>.</sub>
+<sub>The whole schematic is on one sheet, with a frame around each block. <a href="Docs/MAGNIS-v1_Schematic.pdf">Open it as a PDF</a>.</sub>
 
 ---
 
